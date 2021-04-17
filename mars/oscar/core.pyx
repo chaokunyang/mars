@@ -76,6 +76,9 @@ cdef class ActorRef:
                other.address == self.address and \
                other.uid == self.uid
 
+    def __repr__(self):
+        return 'ActorRef(uid={!r}, address={!r})'.format(self.uid, self.address)
+
 
 cdef class _DelayedArgument:
     cdef readonly tuple arguments
@@ -225,19 +228,23 @@ cdef class _Actor:
         Run an async generator under Actor lock
         """
         cdef tuple res_tuple
+        cdef bint is_exception = False
         cdef object res
 
         try:
             res = None
             while True:
                 async with self._lock:
-                    res = await gen.asend(res)
-
+                    if not is_exception:
+                        res = await gen.asend(res)
+                    else:
+                        res = await gen.athrow(*res)
                 try:
                     res = await self._handle_actor_result(res)
+                    is_exception = False
                 except:
-                    async with self._lock:
-                        res = await gen.athrow(*sys.exc_info())
+                    res = sys.exc_info()
+                    is_exception = True
         except StopAsyncIteration:
             pass
         return res

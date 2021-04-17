@@ -55,6 +55,16 @@ class Serializer:
         _serial_dispatcher.register(obj_type, inst)
         _deserializers[cls.serializer_name] = inst
 
+    @staticmethod
+    def unregister(obj_type):
+        handler = _serial_dispatcher.get_handler(obj_type)
+        _serial_dispatcher.unregister(obj_type)
+        _deserializers.pop(handler.__class__.serializer_name, None)
+
+    @classmethod
+    def get_registered_types(cls):
+        return _serial_dispatcher.get_registered_types()
+
 
 def buffered(func):
     @wraps(func)
@@ -311,6 +321,11 @@ class Placeholder:
 
 
 def serialize(obj, context: Dict = None):
+    # todo remove this when gevent dependency removed
+    # workaround for traceback pickling error
+    from ..lib.tblib import pickling_support
+    pickling_support.install()
+
     def _wrap_headers(_obj, _serializer_name, _header, _buffers):
         if _header.get('serializer') == 'ref':
             return _header, _buffers
@@ -324,6 +339,7 @@ def serialize(obj, context: Dict = None):
 
     serializer = _serial_dispatcher.get_handler(type(obj))
     result = serializer.serialize(obj, context)
+
 
     if not isinstance(result, types.GeneratorType):
         # result is not a generator, return directly

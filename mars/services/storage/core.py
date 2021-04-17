@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 def _build_data_info(storage_info: ObjectInfo, level, size):
     # todo handle multiple
-    band = 'numa-0' if storage_info.device is not None \
+    band = 'numa-0' if storage_info.device is None \
         else f'gpu-{storage_info.device}'
     if storage_info.size is None:
         store_size = size
@@ -311,6 +311,7 @@ class StorageManagerActor(mo.Actor):
                              storage_backend: str,
                              storage_config: Dict):
         backend = get_storage_backend(storage_backend)
+        storage_config = storage_config or dict()
         init_params, teardown_params = await backend.setup(**storage_config)
         client = backend(**init_params)
         self._init_params[storage_backend] = init_params
