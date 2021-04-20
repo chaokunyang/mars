@@ -17,7 +17,7 @@ import threading
 import uuid
 import warnings
 from abc import ABC, abstractmethod
-from typing import Dict, Type, Tuple, Union
+from typing import Dict, Type, Tuple, Union, TypeVar
 
 from ..utils import classproperty
 from .typing import TileableType
@@ -61,6 +61,9 @@ class ExecutionInfo(ABC):
         return self._future.__await__()
 
 
+SessionType = TypeVar('SessionType', bound='AbstractSession')
+
+
 class AbstractSession(ABC):
     name = None
     _default_session_local = threading.local()
@@ -75,12 +78,12 @@ class AbstractSession(ABC):
     def address(self):
         return self._address
 
-    @staticmethod
+    @classmethod
     @abstractmethod
     async def init(cls,
                    address: str,
                    session_id: str,
-                   **kwargs) -> "AbstractSession":
+                   **kwargs) -> SessionType:
         """
         Init a new session.
 

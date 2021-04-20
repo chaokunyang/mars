@@ -12,20 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import logging
 import os
 import yaml
 from typing import Union, Dict, List
+import cloudpickle
 
+from mars.serialization import serialize, deserialize
+from mars.serialization.ray import register_ray_serializers
 from mars.oscar.backends.ray.driver import RayActorDriver
 from .service import start_supervisor, start_worker, stop_supervisor, stop_worker
 from .session import Session
 from .pool import create_supervisor_actor_pool, create_worker_actor_pool
 from ... import oscar as mo
-from ...core.session import _new_session, AbstractSession
-from ...utils import lazy_import
+from ...core.session import _new_session, AbstractSession, SessionType, ExecutionInfo, register_session_cls
+from ...utils import lazy_import, implements
 
-ray = lazy_import("ray")
+try:
+    import aiohttp
+    from aiohttp import web
+except ImportError:
+    aiohttp = None
+    web = None
+
+ray = lazy_import('ray')
 logger = logging.getLogger(__name__)
 
 
@@ -123,14 +134,15 @@ class RayCluster:
 class RayClient:
     def __init__(self,
                  cluster: RayCluster,
-                 session: AbstractSession):
+                 session: 'RayRemoteSession'):
         self._cluster = cluster
         self._address = cluster.supervisor_address
         self._session = session
 
     @classmethod
-    async def create(cls, cluster: RayCluster) -> "RayClient":
-        session = await _new_session(cluster.supervisor_address, backend=Session.name, default=True)
+    async def create(cls, cluster: RayCluster) -> 'RayClient':
+        session = await _new_session(
+            cluster.supervisor_address, backend=RayRemoteSession.name, default=True)
         return RayClient(cluster, session)
 
     @property
@@ -150,3 +162,124 @@ class RayClient:
     async def stop(self):
         await self._session.destroy()
         RayActorDriver.stop_cluster()
+
+
+@register_session_cls
+class RayRemoteSession(Session):
+    name = 'rayoscar'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.proxy_address = None
+        self.server = None
+        self.tileable_dict = {}
+        self.closed = False
+
+    @classmethod
+    async def init(cls,
+                   address: str,
+                   session_id: str,
+                   **kwargs) -> 'SessionType':
+        session = await super().init(address, session_id, **kwargs)
+        if aiohttp:
+            await session.start()
+        return session
+
+    async def start(self):
+        from mars.utils import get_next_port
+        import socket
+        host = socket.gethostbyname(socket.gethostname())
+        port = get_next_port()
+        self.proxy_address = f'http://{host}:{port}'
+        logger.info('Starting session proxy on %s', self.proxy_address)
+
+        def error_processor(func):
+
+            async def _handler(*args, **kwargs):
+                try:
+                    result = await func(*args, **kwargs)
+                    return web.Response(body=cloudpickle.dumps(serialize(result)), status=200)
+                except Exception as e:
+                    logger.warning(f'Execution {func} error: {e}')
+                    import traceback
+                    traceback.print_exc()
+                    return web.Response(body=cloudpickle.dumps(serialize(e)), status=500)
+
+            return _handler
+
+        app = web.Application(client_max_size=1024 ** 3 * 32)
+        app.add_routes([web.post('/destroy', error_processor(self.handle_destroy)),
+                        web.post('/execute', error_processor(self.handle_execute)),
+                        web.post('/fetch', error_processor(self.handle_fetch))])
+        self.server: asyncio.Task = asyncio.create_task(web._run_app(app, host=host, port=port))
+
+    async def handle_destroy(self, *_):
+        await self.destroy()
+        return web.Response()
+
+    async def handle_execute(self, request: 'web.Request'):
+        tileables, tileable_ids, kwargs = deserialize(*(cloudpickle.loads(await request.read())))
+        self.tileable_dict.update(dict(zip(tileable_ids, tileables)))
+        execution_info = await self.execute(*tileables, **kwargs)
+        await execution_info
+
+    async def handle_fetch(self, request: 'web.Request'):
+        tileables, tileable_ids = deserialize(*cloudpickle.loads(await request.read()))
+        tileables = [self.tileable_dict.get(_id, t) for t, _id in zip(tileables, tileable_ids)]
+        result = await self.fetch(*tileables)
+        return result
+
+    async def destroy(self):
+        if not self.closed:
+            self.closed = True
+            await super().destroy()
+            self.server.cancel()
+
+
+class _ExecutionInfo(ExecutionInfo):
+
+    def progress(self) -> float:
+        return 1.0
+
+
+class RayClientSession(AbstractSession):
+
+    def __init__(self, address: str, session_id: str):
+        super().__init__(address, session_id)
+        self.session = aiohttp.ClientSession(loop=asyncio.get_event_loop())
+        self.proxy_address = address
+        register_ray_serializers()
+
+    @classmethod
+    @implements(AbstractSession.init)
+    async def init(cls, address: str, session_id: str, **kwargs) -> 'SessionType':
+        return RayClientSession(address, session_id)
+
+    async def destroy(self):
+        async with self.session.post(f'{self.proxy_address}/destroy') as response:
+            result = deserialize(*cloudpickle.loads(await response.read()))
+            if response.status != 200:
+                assert isinstance(result, Exception)
+                raise result
+        await self.session.close()
+
+    async def execute(self, *tileables, **kwargs) -> ExecutionInfo:
+        tileables_ids = [id(t) for t in tileables]
+        data = cloudpickle.dumps(serialize((tileables, tileables_ids, kwargs)))
+        async with self.session.post(f'{self.proxy_address}/execute', data=data) as response:
+            result = deserialize(*cloudpickle.loads(await response.read()))
+            if response.status != 200:
+                assert isinstance(result, Exception)
+                raise result
+            future = asyncio.get_event_loop().create_future()
+            future.set_result(None)
+            return _ExecutionInfo(future)
+
+    async def fetch(self, *tileables) -> list:
+        data = cloudpickle.dumps(serialize((tileables, [id(t) for t in tileables])))
+        async with self.session.post(f'{self.proxy_address}/fetch', data=data) as response:
+            result = deserialize(*cloudpickle.loads(await response.read()))
+            if response.status != 200:
+                assert isinstance(result, Exception)
+                raise result
+            return result

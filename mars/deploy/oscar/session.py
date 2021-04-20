@@ -18,7 +18,7 @@ from numbers import Integral
 from weakref import WeakKeyDictionary
 
 from ...core import Tileable, TileableGraph, TileableGraphBuilder, enter_mode
-from ...core.session import AbstractSession, register_session_cls, \
+from ...core.session import AbstractSession, SessionType, register_session_cls, \
     ExecutionInfo as AbstractExectionInfo
 from ...services.meta import MetaAPI
 from ...services.session import SessionAPI
@@ -69,7 +69,7 @@ class Session(AbstractSession):
     async def init(cls,
                    address: str,
                    session_id: str,
-                   **kwargs) -> "Session":
+                   **kwargs) -> 'SessionType':
         if kwargs.pop('init_local', False):
             from .local import new_cluster
             return (await new_cluster(address, **kwargs)).session
@@ -85,8 +85,7 @@ class Session(AbstractSession):
             raise TypeError(f'Oscar session got unexpected '
                             f'arguments: {unexpected_keys}')
 
-        return Session(address, session_id,
-                       session_api, meta_api, task_api)
+        return cls(address, session_id, session_api, meta_api, task_api)
 
     async def _run_in_background(self,
                                  tileables: list,
