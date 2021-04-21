@@ -60,10 +60,6 @@ class Serializer:
         _serial_dispatcher.unregister(obj_type)
         _deserializers.pop(cls.serializer_name, None)
 
-    @classmethod
-    def get_registered_handlers(cls):
-        return _serial_dispatcher.get_registered_handlers()
-
 
 def buffered(func):
     @wraps(func)
@@ -338,7 +334,6 @@ def serialize(obj, context: Dict = None):
 
     serializer = _serial_dispatcher.get_handler(type(obj))
     result = serializer.serialize(obj, context)
-
 
     if not isinstance(result, types.GeneratorType):
         # result is not a generator, return directly
