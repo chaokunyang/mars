@@ -33,7 +33,7 @@ def ray_cluster():
         from ray._private.cluster_utils import Cluster
     cluster = Cluster()
     remote_nodes = []
-    num_nodes = 1
+    num_nodes = 2
     for i in range(num_nodes):
         remote_nodes.append(cluster.add_node(num_cpus=10))
         if len(remote_nodes) == 1:
@@ -45,7 +45,7 @@ def ray_cluster():
 @pytest.fixture
 async def mars_cluster():
     client = await new_cluster('test_cluster',
-                               worker_num=1,
+                               worker_num=2,
                                worker_cpu=2,
                                worker_mem=1 * 1024 ** 3)
     async with client:
@@ -87,12 +87,18 @@ def test_sync_execute(ray_cluster, mars_cluster):
 @require_ray
 @pytest.mark.asyncio
 async def test_client_session(ray_cluster, mars_cluster):
-    proxy_address, session_id = mars_cluster.session.proxy_address, mars_cluster.session._session_id
+    proxy_address, session_id = mars_cluster.cluster.session_proxy.proxy_address, mars_cluster.session._session_id
     await _client_session_test(proxy_address, session_id)
-    await ray.remote(_run_client_session).remote(proxy_address, session_id)
+    await ray.remote(_run_client_session).remote(proxy_address)
+    session = RayClientSession(proxy_address).as_default()
+    await test_local.test_execute(mars_cluster)
+    session.destroy()
+    session = RayClientSession(proxy_address).as_default()
+    await test_local.test_iterative_tiling(mars_cluster)
+    session.destroy()
 
 
-def _run_client_session(proxy_address, session_id):
+def _run_client_session(proxy_address, session_id=None):
     import asyncio
     asyncio.new_event_loop().run_until_complete(_client_session_test(proxy_address, session_id))
 

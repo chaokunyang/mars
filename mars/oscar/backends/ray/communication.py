@@ -241,7 +241,7 @@ class RayServer(Server):
 
     async def __on_ray_recv__(self, channel_id: ChannelID, message):
         if self.stopped:
-            raise ServerClosed(f'Remote server {self.address} closed')
+            raise ServerClosed(f'Remote server {self.address} closed, but got message {message}')
         channel = self._channels.get(channel_id)
         if not channel:
             _, peer_channel_index, peer_dest_address = channel_id
