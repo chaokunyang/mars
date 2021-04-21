@@ -25,6 +25,7 @@ from ....serialization.ray import register_ray_serializers
 from ....utils import lazy_import
 from ..config import ActorPoolConfig
 from ..pool import AbstractActorPool, MainActorPoolBase, SubActorPoolBase, create_actor_pool, _register_message_handler
+from ..router import Router
 from .communication import ChannelID, RayServer
 from .utils import process_address_to_placement, process_placement_to_address, get_placement_group
 
@@ -85,7 +86,15 @@ class RayMainActorPool(MainActorPoolBase):
 
 @_register_message_handler
 class RaySubActorPool(SubActorPoolBase):
-    pass
+
+    async def stop(self):
+        try:
+            # clean global router
+            Router.get_instance().remove_router(self._router)
+            # stop all clients
+            await self._caller.stop()
+        finally:
+            self._stopped.set()
 
 
 class PoolStatus(Enum):

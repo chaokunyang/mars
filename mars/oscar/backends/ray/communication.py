@@ -93,7 +93,7 @@ class RayClientChannel(RayChannelBase):
     @implements(Channel.send)
     async def send(self, message: Any):
         if self._closed.is_set():  # pragma: no cover
-            raise ChannelClosed('Channel already closed, cannot send message')
+            raise ChannelClosed(f'Channel already closed, cannot send message {message}')
         # Put ray object ref to queue
         await self._in_queue.put(self._peer_actor.__on_ray_recv__.remote(
             self.channel_id, serialize(message)))
@@ -101,7 +101,7 @@ class RayClientChannel(RayChannelBase):
     @implements(Channel.recv)
     async def recv(self):
         if self._closed.is_set():  # pragma: no cover
-            raise ChannelClosed('Channel already closed, cannot write message')
+            raise ChannelClosed(f'Channel already closed, cannot receive message')
         try:
             # Wait on ray object ref
             object_ref = await self._in_queue.get()
@@ -132,7 +132,7 @@ class RayServerChannel(RayChannelBase):
     @implements(Channel.send)
     async def send(self, message: Any):
         if self._closed.is_set():  # pragma: no cover
-            raise ChannelClosed('Channel already closed, cannot send message')
+            raise ChannelClosed(f'Channel already closed, cannot send message {message}')
         # Current process is ray actor, we use ray call reply to send message to ray driver/actor.
         # Not that we can only send once for every read message in channel, otherwise
         # it will be taken as other message's reply.
@@ -144,7 +144,7 @@ class RayServerChannel(RayChannelBase):
     @implements(Channel.recv)
     async def recv(self):
         if self._closed.is_set():  # pragma: no cover
-            raise ChannelClosed('Channel already closed, cannot write message')
+            raise ChannelClosed('Channel already closed, cannot receive message')
         try:
             return deserialize(*(await self._in_queue.get()))
         except RuntimeError:
@@ -159,7 +159,7 @@ class RayServerChannel(RayChannelBase):
         done, _ = await asyncio.wait([self._out_queue.get(), self._closed.wait()],
                                      return_when=asyncio.FIRST_COMPLETED)
         if self._closed.is_set():  # pragma: no cover
-            raise ChannelClosed('Channel already closed')
+            raise ChannelClosed(f'Channel already closed, but got message {deserialize(*message)}')
         if done:
             return await done.pop()
 
