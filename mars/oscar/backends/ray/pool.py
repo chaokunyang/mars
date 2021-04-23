@@ -66,7 +66,8 @@ class RayMainActorPool(MainActorPoolBase):
             bundle_index = -1
         # Hold actor_handle to avoid actor being freed.
         actor_handle = ray.remote(RaySubPool).options(
-            num_cpus=1, name=external_address, placement_group=pg,
+            num_cpus=1, memory=0,  # placement group bundle has specified memory
+            name=external_address, placement_group=pg,
             placement_group_bundle_index=bundle_index).remote()
         await actor_handle.start.remote(actor_pool_config, process_index)
         return actor_handle

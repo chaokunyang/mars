@@ -36,7 +36,7 @@ class RayActorDriver(BaseActorDriver):
         pg = ray.util.placement_group(name=pg_name,
                                       bundles=bundles,
                                       strategy="SPREAD")
-        ray.get(pg.ready())
+        assert pg.wait(10)
         cluster_info = {
             'address_to_resources': address_to_resources,
             'pg_name': pg_name,
