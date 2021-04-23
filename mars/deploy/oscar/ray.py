@@ -84,7 +84,7 @@ class RayCluster:
         supervisor_node_address = f'ray://{self._cluster_name}/0'
         address_to_resources[supervisor_node_address] = {
             'CPU': 1,
-            # 'memory': self._supervisor_mem
+            'memory': self._supervisor_mem
         }
         worker_node_addresses = []
         for worker_index in range(1, self._worker_num + 1):
@@ -92,7 +92,7 @@ class RayCluster:
             worker_node_addresses.append(worker_node_address)
             address_to_resources[worker_node_address] = {
                 'CPU': self._worker_cpu,
-                # 'memory': self._worker_mem
+                'memory': self._worker_mem
             }
         mo.setup_cluster(address_to_resources)
 

@@ -7,4 +7,5 @@ include mars/.git-branch
 include mars/lib/mmh3_src/*
 recursive-include mars/web/static *
 recursive-include mars/web/templates *
+global-include *.yml
 global-exclude .DS_Store
