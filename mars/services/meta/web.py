@@ -21,14 +21,10 @@ class MetaWebHandler(ServiceWebHandlerBase):
     _api_cls = MetaAPI
 
     async def create(self, session_id: str, address: str):
-        api_instance = await MetaAPI.create(session_id, address)
-        self._api_instances[id(api_instance)] = api_instance
-        return id(api_instance)
+        return self._api_registry.add_instance(await MetaAPI.create(session_id, address))
 
     async def create_session(self, session_id: str, address: str):
-        api_instance = await MetaAPI.create(session_id, address)
-        self._api_instances[id(api_instance)] = api_instance
-        return id(api_instance)
+        return self._api_registry.add_instance(await MetaAPI.create_session(session_id, address))
 
 
 _service_name = 'meta'
@@ -55,4 +51,3 @@ class MetaWebAPI(ServiceWebAPIBase):
     @classmethod
     async def destroy_session(cls, session_id: str, address: str):
         return await cls._post(AsyncHTTPClient(), 'destroy_session',  None, {}, session_id, address)
-
