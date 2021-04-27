@@ -17,7 +17,7 @@
 from ._version import __version__
 from .config import options
 
-from .core.session import new_session, execute, fetch, stop_server
+#from .core.session import new_session, execute, fetch, stop_server
 # register
-from .deploy.oscar.session import Session
-del Session
+#from .deploy.oscar.session import Session
+#del Session
