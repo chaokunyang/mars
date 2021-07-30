@@ -116,7 +116,9 @@ class RayClientChannel(RayChannelBase):
         try:
             # Wait on ray object ref
             message, object_ref = await self._in_queue.get()
-            with debug_async_timeout('ray_object_retrieval_timeout', 'Client sent message is %s', message):
+            with debug_async_timeout('ray_object_retrieval_timeout',
+                                     'Message that client sent to actor %s is %s',
+                                     self.dest_address, message):
                 result = await object_ref
             if isinstance(result, RayChannelException):
                 raise result.exc_value.with_traceback(result.exc_traceback)
