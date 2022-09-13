@@ -762,6 +762,8 @@ cdef class Buffer:
 
     cpdef bytes to_bytes(self, int32_t offset=0, int32_t length=0):
         if length != 0:
+            if length > self._size or length < 0:
+                raise Exception(f"length {length} size {self._size}")
             assert 0 < length <= self._size,\
                 f"length {length} size {self._size}"
         else:
@@ -851,12 +853,30 @@ cdef class NullableSerializer(Serializer):
             return self.reader(buffer)
 
 
+cpdef inline write_nullable_string(Buffer buffer, value):
+    if value is None:
+        buffer.write_int8(0)
+    else:
+        buffer.write_int8(1)
+        return buffer.write_string(value)
+
+
+cpdef inline read_nullable_string(Buffer buffer):
+    if buffer.read_int8() == 0:
+        return None
+    else:
+        return buffer.read_string()
+
+
 cdef class StringSerializer(PrimitiveSerializer):
+    def __init__(self):
+        super().__init__(write_nullable_string, read_nullable_string)
+
     cpdef write(self, Buffer buffer, value):
-        buffer.write_nullable_string(value)
+        buffer.write_string(value)
 
     cpdef read(self, Buffer buffer):
-        return buffer.read_nullable_string()
+        return buffer.read_string()
 
 
 cdef class CollectionSerializer(Serializer):
@@ -880,14 +900,12 @@ cdef class CollectionSerializer(Serializer):
         buffer.write_varint32(len(value))
         return False
 
-
-cdef class ListSerializer(CollectionSerializer):
     cpdef write(self, Buffer buffer, value):
         if self.write_header(buffer, value):
             return
         element_serializer = self.element_serializer
         for v in value:
-            element_serializer.write(buffer, value)
+            element_serializer.write(buffer, v)
 
     cpdef read(self, Buffer buffer):
         if self.nullable:
@@ -899,6 +917,10 @@ cdef class ListSerializer(CollectionSerializer):
         for _ in range(length):
             value.append(element_serializer.read(buffer))
         return value
+
+
+cdef class ListSerializer(CollectionSerializer):
+    pass
 
 
 cdef class Int32CollectionSerializer(CollectionSerializer):
@@ -1014,6 +1036,11 @@ cdef class StringListSerializer(StringCollectionSerializer):
         else:
             for item in value:
                 buffer.write_string(item)
+
+
+cdef class TupleSerializer(CollectionSerializer):
+    cpdef read(self, Buffer buffer):
+        return tuple(super().read(buffer))
 
 
 cdef class Int32TupleSerializer(Int32CollectionSerializer):
@@ -1132,8 +1159,7 @@ cdef class DictSerializer(Serializer):
 
 cdef class StringKVDictSerializer(DictSerializer):
     def __init__(self, c_bool nullable, c_bool key_nullable, c_bool value_nullable):
-        super().__init__(nullable, key_nullable, value_nullable,
-                         StringSerializer(key_nullable), StringSerializer(value_nullable))
+        super().__init__(nullable, key_nullable, value_nullable, StringSerializer(), StringSerializer())
 
     cpdef write(self, Buffer buffer, v):
         if self.write_header(buffer, v):
