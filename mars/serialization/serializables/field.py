@@ -31,21 +31,21 @@ from .field_type import (
 
 class Field(ABC):
     __slots__ = (
-        "_tag",
-        "_default_value",
-        "_default_factory",
-        "_on_serialize",
-        "_on_deserialize",
-        "_nullable",
+        "tag",
+        "default_value",
+        "default_factory",
+        "on_serialize",
+        "on_deserialize",
+        "nullable",
         "name",  # The __name__ of member_descriptor
         "get",  # The __get__ of member_descriptor
         "set",  # The __set__ of member_descriptor
         "__delete__",  # The __delete__ of member_descriptor
     )
 
-    _tag: str
-    _default_value: Any
-    _default_factory: Optional[Callable]
+    tag: str
+    default_value: Any
+    default_factory: Optional[Callable]
 
     def __init__(
         self,
@@ -61,30 +61,17 @@ class Field(ABC):
         ):  # pragma: no cover
             raise ValueError("default and default_factory can not be specified both")
 
-        self._tag = tag
-        self._default_value = default
-        self._default_factory = default_factory
-        self._on_serialize = on_serialize
-        self._on_deserialize = on_deserialize
+        self.tag = tag
+        self.default_value = default
+        self.default_factory = default_factory
+        self.on_serialize = on_serialize
+        self.on_deserialize = on_deserialize
         if nullable is None:
-            nullable = False if default is not None else True
-        self._nullable = nullable
-
-    @property
-    def tag(self):
-        return self._tag
-
-    @property
-    def on_serialize(self):
-        return self._on_serialize
-
-    @property
-    def on_deserialize(self):
-        return self._on_deserialize
-
-    @property
-    def nullable(self):
-        return self._nullable
+            if default is not None and default is not no_default:
+                nullable = False
+            else:
+                nullable = True
+        self.nullable = nullable
 
     @property
     @abstractmethod
@@ -102,12 +89,12 @@ class Field(ABC):
         try:
             return self.get(instance, owner)
         except AttributeError:
-            if self._default_value is not no_default:
-                val = self._default_value
+            if self.default_value is not no_default:
+                val = self.default_value
                 self.set(instance, val)
                 return val
-            elif self._default_factory is not None:
-                val = self._default_factory()
+            elif self.default_factory is not None:
+                val = self.default_factory()
                 self.set(instance, val)
                 return val
             else:
@@ -121,8 +108,8 @@ class Field(ABC):
                 field_type = self.field_type
                 try:
                     to_check_value = value
-                    if to_check_value is not None and self._on_serialize:
-                        to_check_value = self._on_serialize(to_check_value)
+                    if to_check_value is not None and self.on_serialize:
+                        to_check_value = self.on_serialize(to_check_value)
                     field_type.validate(to_check_value)
                 except (TypeError, ValueError) as e:
                     raise type(e)(
@@ -132,13 +119,13 @@ class Field(ABC):
         self.set(instance, value)
 
     def __repr__(self):
-        r = f"{type(self).__name__}(tag={self._tag}, default_value={self._default_value}"
-        if self._default_factory is not None:
-            r += f", default_value={self._default_value}"
-        if self._on_serialize is not None:
-            r += f", on_serialize={self._on_serialize}"
-        if self._on_deserialize is not None:
-            r += f", on_deserialize={self._on_deserialize}"
+        r = f"{type(self).__name__}(tag={self.tag}, default_value={self.default_value}"
+        if self.default_factory is not None:
+            r += f", default_value={self.default_value}"
+        if self.on_serialize is not None:
+            r += f", on_serialize={self.on_serialize}"
+        if self.on_deserialize is not None:
+            r += f", on_deserialize={self.on_deserialize}"
         return r
 
 
@@ -414,7 +401,9 @@ class _CollectionField(Field, metaclass=ABCMeta):
         )
         if field_type is None:
             field_type = FieldTypes.any
-        if not isinstance(field_type, ListType):
+        if type(self) is ListField and not isinstance(field_type, ListType):
+            field_type = self._collection_type()(field_type, ...)
+        if type(self) is TupleField and not isinstance(field_type, TupleType):
             field_type = self._collection_type()(field_type, ...)
         self._field_type = field_type
         self._elements_nullable = elements_nullable
@@ -547,8 +536,8 @@ class ReferenceField(Field):
                 field_type = self.get_field_type(instance)
                 try:
                     to_check_value = value
-                    if to_check_value is not None and self._on_serialize:
-                        to_check_value = self._on_serialize(to_check_value)
+                    if to_check_value is not None and self.on_serialize:
+                        to_check_value = self.on_serialize(to_check_value)
                     field_type.validate(to_check_value)
                 except (TypeError, ValueError) as e:
                     raise type(e)(
@@ -597,8 +586,8 @@ class OneOfField(Field):
         for reference_field in self._reference_fields:
             try:
                 to_check_value = value
-                if to_check_value is not None and self._on_serialize:
-                    to_check_value = self._on_serialize(to_check_value)
+                if to_check_value is not None and self.on_serialize:
+                    to_check_value = self.on_serialize(to_check_value)
                 reference_field.get_field_type(instance).validate(to_check_value)
                 self.set(instance, value)
                 return

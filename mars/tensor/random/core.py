@@ -21,7 +21,12 @@ import numpy as np
 
 from ...config import options
 from ...core import recursive_tile
-from ...serialization.serializables import FieldTypes, TupleField, Int32Field
+from ...serialization.serializables import (
+    FieldTypes,
+    TupleField,
+    Int32Field,
+    Int64Field,
+)
 from ..core import TENSOR_TYPE, TENSOR_CHUNK_TYPE
 from ..utils import decide_chunk_sizes, gen_random_seeds, broadcast_shape
 from ..array_utils import array_module, device
@@ -349,12 +354,14 @@ class TensorSeedOperandMixin(object):
 
 
 class TensorRandomOperand(TensorSeedOperandMixin, TensorOperand):
-    seed = Int32Field("seed")
+    seed = Int64Field("seed")
 
     def __init__(self, dtype=None, **kw):
         dtype = np.dtype(dtype) if dtype is not None else dtype
         if "state" in kw:
             kw["_state"] = kw.pop("state")
+        if kw.get("seed") is not None:
+            print(kw)
         super().__init__(dtype=dtype, **kw)
 
 

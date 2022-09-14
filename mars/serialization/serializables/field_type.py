@@ -367,8 +367,10 @@ class _CollectionType(AbstractFieldType, metaclass=ABCMeta):
             return f"{base_name}[{field_type_names}]"
 
     def is_homogeneous(self):
-        return len(self._field_types) == 1 or (
-            len(self._field_types) == 2 and self._field_types[1] is Ellipsis
+        return (
+            len(self._field_types) == 1
+            or (len(self._field_types) == 2 and self._field_types[1] is Ellipsis)
+            or len(set(self._field_types)) == 1
         )
 
     def validate(self, value):
