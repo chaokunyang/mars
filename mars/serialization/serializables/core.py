@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import functools
+
 import os
 import operator
 import threading
@@ -35,6 +35,7 @@ from ...lib.fury import (
     StringKVDictSerializer,
     DictSerializer,
     Buffer,
+    TupleSerializer,
 )
 from ...utils import no_default
 from ..core import Serializer, Placeholder, buffered
@@ -49,6 +50,7 @@ from .field_type import (
     TimedeltaType,
     TZInfoType,
     PrimitiveType,
+    FieldTypes,
 )
 
 
@@ -102,9 +104,9 @@ def get_basic_serializer(field_type, nullable=True):
             PrimitiveType.uint16,
         }:
             return Buffer.write_nullable_varint32, Buffer.read_nullable_varint32
-        elif field_type.type == {PrimitiveType.int64, PrimitiveType.uint32}:
+        elif field_type.type in {PrimitiveType.int64, PrimitiveType.uint32}:
             return Buffer.write_nullable_varint64, Buffer.read_nullable_varint64
-        elif field_type.type == {PrimitiveType.float16, PrimitiveType.float32}:
+        elif field_type.type in {PrimitiveType.float16, PrimitiveType.float32}:
             return Buffer.write_nullable_float32, Buffer.read_nullable_float32
         elif field_type.type == PrimitiveType.float64:
             return Buffer.write_nullable_float64, Buffer.read_nullable_float64
@@ -148,21 +150,33 @@ def get_fury_serializer(field: Field):
     if isinstance(field, ListField):
         assert isinstance(field_type, ListType)
         element_type = field_type.element_types()[0]
-        if element_type == PrimitiveType.int32:
+        if element_type == FieldTypes.int32:
             return Int32ListSerializer(field.nullable, field.elements_nullable)
-        elif element_type == PrimitiveType.int64:
+        elif element_type == FieldTypes.int64:
             return Int64ListSerializer(field.nullable, field.elements_nullable)
-        elif element_type == PrimitiveType.float64:
+        elif element_type == FieldTypes.float64:
             return Float64ListSerializer(field.nullable, field.elements_nullable)
-        elif element_type == PrimitiveType.string:
+        elif element_type == FieldTypes.string:
             return StringListSerializer(field.nullable, field.elements_nullable)
-        element_serializer = get_basic_serializer(element_type, field.elements_nullable)
+        elif isinstance(element_type, TupleType):
+            stub_field = TupleField(
+                "stub", element_type, nullable=False, elements_nullable=True
+            )
+            element_serializer = get_fury_serializer(stub_field)
+        else:
+            element_serializer = get_basic_serializer(
+                element_type, field.elements_nullable
+            )
         if element_serializer is None:
             return None
-        if field.elements_nullable:
-            elem_serializer = NullableSerializer(*element_serializer)
+        if type(element_serializer) is tuple:
+            writer, reader = element_serializer
         else:
-            elem_serializer = PrimitiveSerializer(*element_serializer)
+            writer, reader = element_serializer.write, element_serializer.read
+        if field.elements_nullable:
+            elem_serializer = NullableSerializer(writer, reader)
+        else:
+            elem_serializer = PrimitiveSerializer(writer, reader)
         return ListSerializer(field.nullable, field.elements_nullable, elem_serializer)
 
     if isinstance(field, TupleField):
@@ -170,21 +184,36 @@ def get_fury_serializer(field: Field):
         if not field_type.is_homogeneous():
             return None  # TODO support heterogeneous types
         element_type = field_type.element_types()[0]
-        if element_type == PrimitiveType.int32:
+        if element_type == FieldTypes.int32:
             return Int32TupleSerializer(field.nullable, field.elements_nullable)
-        elif element_type == PrimitiveType.int64:
+        elif element_type == FieldTypes.int64:
             return Int64TupleSerializer(field.nullable, field.elements_nullable)
-        elif element_type == PrimitiveType.float64:
+        elif element_type == FieldTypes.float64:
             return Float64TupleSerializer(field.nullable, field.elements_nullable)
-        elif element_type == PrimitiveType.string:
+        elif element_type == FieldTypes.string:
             return StringTupleSerializer(field.nullable, field.elements_nullable)
-        return None  # TODO support other types
+        elif isinstance(element_type, TupleType):
+            stub_field = TupleField(
+                "stub", element_type, nullable=False, elements_nullable=True
+            )
+            element_serializer = get_fury_serializer(stub_field)
+        else:
+            element_serializer = get_basic_serializer(
+                element_type, field.elements_nullable
+            )
+        if element_serializer is None:
+            return None
+        if field.elements_nullable:
+            elem_serializer = NullableSerializer(*element_serializer)
+        else:
+            elem_serializer = PrimitiveSerializer(*element_serializer)
+        return TupleSerializer(field.nullable, field.elements_nullable, elem_serializer)
 
     if isinstance(field, DictField):
         assert isinstance(field_type, DictType)
         if (
-            field_type.key_type == PrimitiveType.string
-            and field_type.value_type == PrimitiveType.string
+            field_type.key_type == FieldTypes.string
+            and field_type.value_type == FieldTypes.string
         ):
             return StringKVDictSerializer(
                 field.nullable, field.key_nullable, field.value_nullable
@@ -199,7 +228,7 @@ def get_fury_serializer(field: Field):
                 PrimitiveSerializer(*key_serializer),
                 PrimitiveSerializer(*value_serializer),
             )
-    if isinstance(field_type, PrimitiveType):
+    if isinstance(field_type, PrimitiveFieldType):
         return get_basic_serializer(field_type, field.nullable)
     return None
 
@@ -254,7 +283,6 @@ class SerializableMeta(type):
                 v.set = field.set
                 v.__delete__ = field.__delete__
             all_fields[k] = v
-
         # Make field order deterministic to serialize it as list instead of dict.
         all_fields = dict(sorted(all_fields.items(), key=operator.itemgetter(0)))
         pickle_fields = []
@@ -382,15 +410,29 @@ class SerializableSerializer(Serializer):
         if obj._cache_primitive_serial and obj in _primitive_serial_cache:
             primitive_vals = _primitive_serial_cache[obj]
         else:
-            primitive_vals = self._get_field_values(obj, obj._PRIMITIVE_FIELDS)
             if obj._enable_fury_serialization:
                 buffer = get_fury_write_buffer()
                 buffer.writer_index = 0
+                idx = 0
                 for idx, fury_serializer in enumerate(obj.FIELDS_FURY_SERIALIZERS):
-                    fury_serializer(buffer, primitive_vals[idx])
+                    try:
+                        field = obj._PRIMITIVE_FIELDS[idx]
+                        value = field.get(obj)
+                        buffer.write_int8(0)
+                        fury_serializer(buffer, value)
+                    except AttributeError:
+                        # Most field values are not None, serialize by list is more efficient than dict.
+                        buffer.write_int8(1)
                 fury_data = buffer.to_bytes(length=buffer.writer_index)
-                primitive_vals = primitive_vals[len(obj.FIELDS_FURY_SERIALIZERS) :]
+                if len(obj._PRIMITIVE_FIELDS) == len(obj.FIELDS_FURY_SERIALIZERS):
+                    primitive_vals = []
+                else:
+                    primitive_vals = self._get_field_values(
+                        obj, obj._PRIMITIVE_FIELDS[idx + 1 :]
+                    )
                 primitive_vals.append(fury_data)
+            else:
+                primitive_vals = self._get_field_values(obj, obj._PRIMITIVE_FIELDS)
             if obj._cache_primitive_serial:
                 primitive_vals = cloudpickle.dumps(primitive_vals)
                 _primitive_serial_cache[obj] = primitive_vals
@@ -424,11 +466,18 @@ class SerializableSerializer(Serializer):
             fury_data = primitives[-1]
             buffer = get_fury_read_buffer()
             buffer.point_to_bytes(fury_data)
-            vals = []
-            for fury_deserializer in obj.FIELDS_FURY_DESERIALIZERS:
-                vals.append(fury_deserializer(buffer))
-            primitives = vals.extend(primitives)
-        if primitives:
+            idx = 0
+            for idx, fury_deserializer in enumerate(obj.FIELDS_FURY_DESERIALIZERS):
+                if buffer.read_int8() == 0:
+                    value = fury_deserializer(buffer)
+                    obj._PRIMITIVE_FIELDS[idx].set(obj, value)
+            end_idx = len(obj_class._PRIMITIVE_FIELDS)
+            n_fury_fields = len(obj.FIELDS_FURY_DESERIALIZERS)
+            for i in range(idx, end_idx):
+                field = obj_class._PRIMITIVE_FIELDS[idx]
+                value = primitives[idx - n_fury_fields]
+                self._set_field_value(obj, field, value)
+        else:
             for field, value in zip(obj_class._PRIMITIVE_FIELDS, primitives):
                 self._set_field_value(obj, field, value)
 

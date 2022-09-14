@@ -274,6 +274,7 @@ def benchmark_write():
             file = io.BytesIO()
             pickler = pickle.Pickler(file)
             for _ in range(10000):
+                file.seek(0)
                 pickler.clear_memo()
                 pickler.dump(v)
                 pickle_size = file.tell()
