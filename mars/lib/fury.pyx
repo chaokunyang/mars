@@ -19,19 +19,6 @@ cdef int32_t _max_buffer_size = 2 ** 31 - 1
 
 @cython.final
 cdef class Buffer:
-    """This class implements the Python 'buffer protocol', which allows
-    us to use it for calls into Python libraries without having to
-    copy the data."""
-    cdef:
-        uint8_t *c_buffer
-        # hold python buffer reference count
-        object data
-        Py_ssize_t _size
-        Py_ssize_t shape[1]
-        Py_ssize_t stride[1]
-        public int reader_index, writer_index
-        char *errors
-
     def __init__(self, unsigned char[:] data not None, int32_t offset, int32_t length):
         self.data = data
         if offset < 0 or offset > data.nbytes:
@@ -568,7 +555,7 @@ cdef class Buffer:
         self.reader_index += 8
         return value
 
-    cpdef readline(self, size=None):
+    def readline(self, size=None):
         raise NotImplementedError
 
     # Fast path for common composite types to avoid dynamic methods invoke cost.
@@ -760,7 +747,7 @@ cdef class Buffer:
     def slice(self, offset=0, length=None):
         return type(self)(self, offset, length)
 
-    cpdef bytes to_bytes(self, int32_t offset=0, int32_t length=0):
+    def to_bytes(self, int32_t offset=0, int32_t length=0):
         if length != 0:
             if length > self._size or length < 0:
                 raise Exception(f"length {length} size {self._size}")
@@ -800,8 +787,6 @@ cdef class Buffer:
 
 # functools.partial needs to pack and unpack arguments, which is costly.
 cdef class Serializer:
-    cdef readonly c_bool nullable
-
     def __init__(self,  c_bool nullable = False):
         self.nullable = nullable
 
