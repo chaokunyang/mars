@@ -41,6 +41,7 @@ class Field(ABC):
         "get",  # The __get__ of member_descriptor
         "set",  # The __set__ of member_descriptor
         "__delete__",  # The __delete__ of member_descriptor
+        "serializer"
     )
 
     tag: str
@@ -55,6 +56,7 @@ class Field(ABC):
         on_serialize: Callable[[Any], Any] = None,
         on_deserialize: Callable[[Any], Any] = None,
         nullable: bool = None,
+        serializer: str = None,
     ):
         if (
             default is not no_default and default_factory is not None
@@ -72,6 +74,9 @@ class Field(ABC):
             else:
                 nullable = True
         self.nullable = nullable
+        if self.on_serialize is not None or self.on_deserialize is not None:
+            serializer = 'mars'
+        self.serializer = serializer
 
     @property
     @abstractmethod
@@ -390,6 +395,7 @@ class _CollectionField(Field, metaclass=ABCMeta):
         on_deserialize: Callable[[Any], Any] = None,
         nullable: bool = None,
         elements_nullable: bool = False,
+        serializer: str = None,
     ):
         super().__init__(
             tag,
@@ -398,6 +404,7 @@ class _CollectionField(Field, metaclass=ABCMeta):
             on_serialize=on_serialize,
             on_deserialize=on_deserialize,
             nullable=nullable,
+            serializer=serializer,
         )
         if field_type is None:
             field_type = FieldTypes.any
@@ -459,6 +466,7 @@ class DictField(Field):
         nullable: bool = None,
         key_nullable: bool = False,
         value_nullable: bool = False,
+        serializer: str = None,
     ):
         super().__init__(
             tag,
@@ -467,6 +475,7 @@ class DictField(Field):
             on_serialize=on_serialize,
             on_deserialize=on_deserialize,
             nullable=nullable,
+            serializer=serializer,
         )
         self._field_type = DictType(key_type, value_type)
         self._key_nullable = key_nullable
@@ -495,12 +504,14 @@ class ReferenceField(Field):
         default: Any = no_default,
         on_serialize: Callable[[Any], Any] = None,
         on_deserialize: Callable[[Any], Any] = None,
+        serializer: str = "mars",
     ):
         super().__init__(
             tag,
             default=default,
             on_serialize=on_serialize,
             on_deserialize=on_deserialize,
+            serializer=serializer,
         )
         self._reference_type = reference_type
 

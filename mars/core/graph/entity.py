@@ -125,11 +125,11 @@ class SerializableGraph(Serializable):
     # but in the graph, the predecessors are all fetch chunks,
     # we serialize the fetch chunks first to make sure when operand's inputs
     # are serialized, they will just be marked as serialized and skip serialization.
-    _fetch_nodes = ListField("fetch_nodes")
-    _nodes = DictField("nodes")
-    _predecessors = DictField("predecessors")
-    _successors = DictField("successors")
-    _results = ListField("results")
+    _fetch_nodes = ListField("fetch_nodes", serializer="mars")
+    _nodes = DictField("nodes", serializer="mars")
+    _predecessors = DictField("predecessors", serializer="mars")
+    _successors = DictField("successors", serializer="mars")
+    _results = ListField("results", serializer="mars")
 
     @classmethod
     def from_graph(cls, graph: Union[TileableGraph, ChunkGraph]) -> "SerializableGraph":

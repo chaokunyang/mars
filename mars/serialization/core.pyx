@@ -19,6 +19,7 @@ import enum
 import hashlib
 import inspect
 import sys
+import threading
 from functools import partial, wraps
 from typing import Any, Dict, List
 
@@ -30,6 +31,7 @@ from libcpp.unordered_map cimport unordered_map
 
 from .._utils import NamedType
 from .._utils cimport TypeDispatcher
+from ..lib.fury cimport Buffer
 
 import cloudpickle
 
@@ -225,13 +227,13 @@ def pickle_buffers(obj):
                 x = x.cast(x.format)
             buffers.append(memoryview(x))
 
-        buffers[0] = cloudpickle.dumps(
+        buffers[0] = pickle.dumps(
             obj,
             buffer_callback=buffer_cb,
             protocol=BUFFER_PICKLE_PROTOCOL,
         )
     else:  # pragma: no cover
-        buffers[0] = cloudpickle.dumps(obj)
+        buffers[0] = pickle.dumps(obj)
     return buffers
 
 
@@ -337,37 +339,40 @@ cdef class CollectionSerializer(Serializer):
         # make the value can be referenced with C code
         self._obj_type = self.obj_type
 
-    cdef tuple _serial_iterable(self, obj: Any):
+    cpdef tuple _serial_iterable(self, obj: Any, dict context):
         cdef list idx_to_propagate = []
         cdef list obj_to_propagate = []
-        cdef list obj_list = <list>obj if type(obj) is list else list(obj)
+        cdef list primitives = []
         cdef int64_t idx
         cdef object item
+        cdef Buffer buffer = context["buffer"]
 
-        for idx in range(len(obj_list)):
-            item = obj_list[idx]
-
-            if type(item) is bytes and len(<bytes>item) < _MAX_STR_PRIMITIVE_LEN:
+        for idx, item in enumerate(obj):
+            item_type = type(item)
+            if item_type is bytes and len(<bytes>item) < _MAX_STR_PRIMITIVE_LEN:
                 # treat short strings as primitives
-                continue
-            elif type(item) is str and len(<str>item) < _MAX_STR_PRIMITIVE_LEN:
+                buffer.write_int8(0)
+                buffer.write_bytes(item)
+            elif item_type is str and len(<str>item) < _MAX_STR_PRIMITIVE_LEN:
                 # treat short strings as primitives
-                continue
+                buffer.write_int8(1)
+                buffer.write_string(item)
+            elif item_type is int:
+                buffer.write_int8(2)
+                buffer.write_varint64(item)
             elif type(item) in _primitive_types:
-                continue
-
-            if obj is obj_list:
-                obj_list = list(obj)
-
-            obj_list[idx] = None
-            idx_to_propagate.append(idx)
-            obj_to_propagate.append(item)
-
+                buffer.write_int8(3)
+                buffer.write_varint32(len(primitives))
+                primitives.append(item)
+            else:
+                buffer.write_int8(4)
+                buffer.write_varint32(len(obj_to_propagate))
+                obj_to_propagate.append(item)
         if self._obj_type is not None and type(obj) is not self._obj_type:
             obj_type = type(obj)
         else:
             obj_type = None
-        return (obj_list, idx_to_propagate, obj_type), obj_to_propagate, False
+        return (primitives, obj_type), obj_to_propagate, False
 
     cpdef serial(self, obj: Any, dict context):
         cdef uint64_t obj_id
@@ -376,9 +381,9 @@ cdef class CollectionSerializer(Serializer):
             return Placeholder(obj_id)
         context[obj_id] = obj
 
-        return self._serial_iterable(obj)
+        return self._serial_iterable(obj, context)
 
-    cdef list _deserial_iterable(self, tuple serialized, list subs):
+    cpdef list _deserial_iterable(self, tuple serialized, list subs):
         cdef list res_list, idx_to_propagate
         cdef int64_t i
 
@@ -474,8 +479,8 @@ cdef class DictSerializer(CollectionSerializer):
             else:
                 self._inspected_inherits.add(obj_type)
 
-        key_obj, key_bufs, _ = self._serial_iterable(obj.keys())
-        value_obj, value_bufs, _ = self._serial_iterable(obj.values())
+        key_obj, key_bufs, _ = self._serial_iterable(obj.keys(), context)
+        value_obj, value_bufs, _ = self._serial_iterable(obj.values(), context)
         if obj_type is dict:
             obj_type = None
         ser_obj = (key_obj[:-1], value_obj[:-1], len(key_bufs), obj_type)
@@ -634,7 +639,7 @@ class _SerializeObjectOverflow(Exception):
         self.num_total_serialized = num_total_serialized
 
 
-cpdef object _serialize_with_stack(
+cpdef inline object _serialize_with_stack(
     list serial_stack,
     tuple serialized,
     dict context,
@@ -719,6 +724,11 @@ def serialize(obj, dict context = None):
     cdef _IdContextHolder id_context_holder = _IdContextHolder()
 
     context = context if context is not None else dict()
+
+    if "buffer" not in context:
+        buf = get_fury_write_buffer()
+        buf.writer_index = 0
+        context["buffer"] = buf
     serialized, subs, final = _serial_single(obj, context, id_context_holder)
     if final or not subs:
         # marked as a leaf node, return directly
@@ -930,3 +940,22 @@ def deserialize(tuple serialized, list buffers, dict context = None):
     if exc_value is not None:
         raise exc_value
     return deserialized
+
+
+fury_buffer = threading.local()
+
+
+cpdef Buffer get_fury_write_buffer():
+    buffer = getattr(fury_buffer, "write_buffer", None)
+    if buffer is None:
+        buffer = Buffer.allocate(32)
+        fury_buffer.write_buffer = buffer
+    return buffer
+
+
+cpdef Buffer get_fury_read_buffer():
+    buffer = getattr(fury_buffer, "read_buffer", None)
+    if buffer is None:
+        buffer = Buffer.allocate(32)
+        fury_buffer.read_buffer = buffer
+    return buffer

@@ -360,8 +360,6 @@ class TensorRandomOperand(TensorSeedOperandMixin, TensorOperand):
         dtype = np.dtype(dtype) if dtype is not None else dtype
         if "state" in kw:
             kw["_state"] = kw.pop("state")
-        if kw.get("seed") is not None:
-            print(kw)
         super().__init__(dtype=dtype, **kw)
 
 

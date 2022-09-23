@@ -41,7 +41,7 @@ class DataFrameFromTensor(DataFrameOperand, DataFrameOperandMixin):
 
     _op_type_ = OperandDef.DATAFRAME_FROM_TENSOR
 
-    input = AnyField("input")
+    input = AnyField("input", serializer="mars")
     index = AnyField("index")
     columns = AnyField("columns")
 

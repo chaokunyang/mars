@@ -179,7 +179,7 @@ class Operand(Base, OperatorLogicKeyGeneratorMixin, metaclass=OperandMetaclass):
     scheduling_hint = ReferenceField("scheduling_hint", SchedulingHint, default=None)
 
     _inputs = ListField(
-        "inputs", FieldTypes.reference(EntityData), default_factory=list
+        "inputs", FieldTypes.reference(EntityData), default_factory=list, serializer="mars"
     )
     # outputs are weak-refs which are not pickle-able
     _outputs = ListField(

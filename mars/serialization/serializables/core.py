@@ -292,6 +292,7 @@ class SerializableMeta(type):
         fields_fury_deserializers = []
         non_fury_serializable_fields = []
         for v in all_fields.values():
+            # if _is_field_primitive_compound(v) or v.serializer != "mars":
             if _is_field_primitive_compound(v):
                 pickle_fields.append(v)
                 fury_serializer = get_fury_serializer(v)
@@ -341,7 +342,7 @@ class Serializable(metaclass=SerializableMeta):
     __slots__ = ("__weakref__",)
 
     _cache_primitive_serial = False
-    _enable_fury_serialization = _enable_fury_serialization
+    _enable_fury_serialization = False
 
     _FIELDS: Dict[str, Field]
     _PRIMITIVE_FIELDS: List[Field]
@@ -381,6 +382,25 @@ class Serializable(metaclass=SerializableMeta):
             except AttributeError:
                 continue
         return copied
+
+    def __getstate__(self):
+        primitives = SerializableSerializer._get_field_values(self, self._PRIMITIVE_FIELDS)
+        others = SerializableSerializer._get_field_values(self, self._NON_PRIMITIVE_FIELDS)
+        return(
+            primitives,
+            others,
+        )
+
+
+def serializable_unpickler(data):
+    cls, primitives, others = data
+    obj = cls()
+    # 这里如何保持循环引用的正确性
+    for f, v in zip(cls._PRIMITIVE_FIELDS, primitives):
+        SerializableSerializer._set_field_value(obj, f, v)
+    for f, v in zip(cls._NON_PRIMITIVE_FIELDS, others):
+        SerializableSerializer._set_field_value(obj, f, v)
+    return obj
 
 
 _primitive_serial_cache = weakref.WeakKeyDictionary()
@@ -434,10 +454,10 @@ class SerializableSerializer(Serializer):
             else:
                 primitive_vals = self._get_field_values(obj, obj._PRIMITIVE_FIELDS)
             if obj._cache_primitive_serial:
-                primitive_vals = cloudpickle.dumps(primitive_vals)
+                primitive_vals = None
                 _primitive_serial_cache[obj] = primitive_vals
         compound_vals = self._get_field_values(obj, obj._NON_PRIMITIVE_FIELDS)
-        return (type(obj), primitive_vals), [compound_vals], False
+        return (1, None), [compound_vals], False
 
     @staticmethod
     def _set_field_value(obj: Serializable, field: Field, value):

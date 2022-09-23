@@ -69,7 +69,7 @@ class Subtask(Serializable):
     stage_id: str = StringField("stage_id")
     # chunks that need meta updated
     update_meta_chunks: List[ChunkType] = ListField(
-        "update_meta_chunks", FieldTypes.reference(ChunkData)
+        "update_meta_chunks", FieldTypes.reference(ChunkData), serializer="mars"
     )
     # An unique and deterministic key for subtask compute logic. See logic_key in operator.py.
     logic_key: str = StringField("logic_key")
